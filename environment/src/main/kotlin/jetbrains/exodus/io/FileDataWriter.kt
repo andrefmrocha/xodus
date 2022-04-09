@@ -27,6 +27,7 @@ import mu.KLogging
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.lang.reflect.InaccessibleObjectException
 import java.nio.channels.ClosedChannelException
 import java.nio.channels.FileChannel
 
@@ -189,13 +190,17 @@ open class FileDataWriter @JvmOverloads constructor(private val reader: FileData
                             logger.info { "Uninterruptible file channel will be used" }
                         }
                     } catch (t: Throwable) {
-                        logger.info(t) { "Interruptible file channel will be used" }
-                            null
+                        if (t is InaccessibleObjectException) {
+                            logger.info("Interruptible file channel will be used")
+                        } else {
+                            logger.info(t) { "Interruptible file channel will be used" }
                         }
+                        null
                     }
-                } else {
-                    null
                 }
+            } else {
+                null
+            }
 
         private fun FileChannel.asUninterruptible(): FileChannel {
             setUninterruptibleMethod?.invoke(this)
