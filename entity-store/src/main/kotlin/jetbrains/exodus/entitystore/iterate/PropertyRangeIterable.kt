@@ -15,7 +15,6 @@
  */
 package jetbrains.exodus.entitystore.iterate
 
-import jetbrains.exodus.ByteIterable
 import jetbrains.exodus.bindings.ComparableBinding
 import jetbrains.exodus.bindings.ComparableSet
 import jetbrains.exodus.bindings.LongBinding
@@ -48,8 +47,15 @@ class PropertyRangeIterable(
                 EntityIteratorBase.EMPTY
             } else cached.getPropertyRangeIterator(min, max)
         }
-        val valueIdx = openCursor(txn) ?: return EntityIteratorBase.EMPTY
-        return PropertyRangeIterator(valueIdx)
+        return PropertyRangeIterator(openCursor(txn) ?: return EntityIteratorBase.EMPTY)
+    }
+
+    override fun getReverseIteratorImpl(txn: PersistentStoreTransaction): EntityIterator {
+        val it = propertyValueIndex
+        if (it.isCachedInstance) {
+            return super.getReverseIteratorImpl(txn)
+        }
+        return PropertyRangeReverseIterator(openCursor(txn) ?: return EntityIteratorBase.EMPTY)
     }
 
     override fun getHandleImpl(): EntityIterableHandle {
@@ -83,14 +89,9 @@ class PropertyRangeIterable(
             override fun getEntityTypeId() = entityTypeId
 
             override fun isMatchedPropertyChanged(
-                id: EntityId,
-                propId: Int,
-                oldValue: Comparable<*>?,
-                newValue: Comparable<*>?
-            ): Boolean {
-                return propertyId == propId && entityTypeId == id.typeId && (isRangeAffected(oldValue) ||
-                        isRangeAffected(newValue))
-            }
+                id: EntityId, propId: Int, oldValue: Comparable<*>?, newValue: Comparable<*>?
+            ) = propertyId == propId && entityTypeId == id.typeId &&
+                    (isRangeAffected(oldValue) || isRangeAffected(newValue))
 
             private fun isRangeAffected(value: Comparable<*>?): Boolean {
                 if (value == null) {
@@ -134,8 +135,8 @@ class PropertyRangeIterable(
         init {
             setCursor(cursor)
             binding = store.propertyTypes.dataToPropertyValue(min).binding
-            val key: ByteIterable = binding.objectToEntry(min)
-            checkHasNext(getCursor().getSearchKeyRange(key) != null)
+            val key = binding.objectToEntry(min)
+            checkHasNext(cursor.getSearchKeyRange(key) != null)
         }
 
         public override fun hasNextImpl() = hasNext
@@ -144,7 +145,7 @@ class PropertyRangeIterable(
             if (hasNextImpl()) {
                 explain(type)
                 val cursor = cursor
-                val result: EntityId = PersistentEntityId(entityTypeId, LongBinding.compressedEntryToLong(cursor.value))
+                val result = PersistentEntityId(entityTypeId, LongBinding.compressedEntryToLong(cursor.value))
                 checkHasNext(cursor.next)
                 return result
             }
@@ -153,6 +154,42 @@ class PropertyRangeIterable(
 
         private fun checkHasNext(success: Boolean) {
             hasNext = success && max >= binding.entryToObject(cursor.key)
+        }
+    }
+
+    private inner class PropertyRangeReverseIterator(cursor: Cursor) : EntityIteratorBase(this@PropertyRangeIterable) {
+
+        private var hasNext = false
+        private val binding: ComparableBinding
+
+        init {
+            setCursor(cursor)
+            binding = store.propertyTypes.dataToPropertyValue(max).binding
+            val key = binding.objectToEntry(max)
+            if (cursor.getSearchKeyRange(key) == null) {
+                checkHasNext(cursor.prev)
+            } else if (binding.entryToObject(cursor.key) > max) {
+                checkHasNext(cursor.prev)
+            } else {
+                checkHasNext(true)
+            }
+        }
+
+        public override fun hasNextImpl() = hasNext
+
+        public override fun nextIdImpl(): EntityId? {
+            if (hasNextImpl()) {
+                explain(type)
+                val cursor = cursor
+                val result = PersistentEntityId(entityTypeId, LongBinding.compressedEntryToLong(cursor.value))
+                checkHasNext(cursor.prev)
+                return result
+            }
+            return null
+        }
+
+        private fun checkHasNext(success: Boolean) {
+            hasNext = success && binding.entryToObject(cursor.key).let { value -> min <= value && value <= max }
         }
     }
 
