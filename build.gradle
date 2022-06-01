@@ -133,6 +133,12 @@ subprojects {
         //testLogging.showStandardStreams = true
     }
 
+    test {
+        filter {
+            setFailOnNoMatchingTests(false)
+        }
+    }
+
     task javadocJar(type: Jar, dependsOn: javadoc) {
         classifier = 'javadoc'
         duplicatesStrategy 'exclude'
